@@ -171,12 +171,5 @@ MAX_ITERATIONS = 5      # Max improvement attempts
 |----------|-------------|
 | `SSL_CERT_FILE` | Corporate SSL certificate path (auto-detected from `~/rakuten-ca.pem`) |
 
----
-
-## 📝 License
-
-MIT
-
----
 
 Built with ❤️ and iterative improvement
