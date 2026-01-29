@@ -155,12 +155,13 @@ def display_ground_truth_presence(train_stats, test_stats):
 # SCRIPT CLEANUP AND FINAL SAVE
 # =============================================================================
 
-def cleanup_and_save_final(best_script_path, model_type, iteration_count, keep_best=True):
+def cleanup_and_save_final(best_script_path, store_id, model_type, iteration_count, keep_best=True):
     """
-    Clean up candidate scripts and save the best one with a descriptive name.
+    Clean up candidate scripts for a store and save the best one with a descriptive name.
     
     Args:
         best_script_path: Path to the best performing script
+        store_id: The store identifier (included in output filename)
         model_type: The model that generated it (e.g., "claude_fast")
         iteration_count: Number of improvement iterations performed
         keep_best: If True, keeps a copy as the final script
@@ -168,12 +169,15 @@ def cleanup_and_save_final(best_script_path, model_type, iteration_count, keep_b
     Returns:
         Path to the final saved script
     """
-    # Generate final script name
-    final_name = f"final_{model_type}_iter{iteration_count}.py"
+    # Generate final script name with store_id
+    # Sanitize store_id to be safe for filenames
+    safe_store_id = str(store_id).replace('/', '_').replace('\\', '_').replace(' ', '_')
+    final_name = f"final_{safe_store_id}_{model_type}_iter{iteration_count}.py"
     
-    # Find all candidate scripts
+    # Find all candidate scripts for this store
     candidate_patterns = [
-        "candidate_script_*.py",
+        f"candidate_script_{safe_store_id}_*.py",
+        "candidate_script_*.py",  # Also clean up any orphaned scripts
         "fixed_script.py"
     ]
     
@@ -187,7 +191,7 @@ def cleanup_and_save_final(best_script_path, model_type, iteration_count, keep_b
     # Copy best script to final name first (before deleting)
     if keep_best and os.path.exists(best_script_path):
         shutil.copy(best_script_path, final_name)
-        print(f"\n   ✅ Best script saved as: {final_name}")
+        # Print is handled by caller for cleaner output in multi-store mode
     
     # Delete all candidate scripts (except the final one)
     deleted_count = 0
@@ -197,10 +201,7 @@ def cleanup_and_save_final(best_script_path, model_type, iteration_count, keep_b
                 os.remove(script)
                 deleted_count += 1
             except Exception as e:
-                print(f"   ⚠️  Could not delete {script}: {e}")
-    
-    if deleted_count > 0:
-        print(f"   🧹 Cleaned up {deleted_count} candidate script(s)")
+                pass  # Silent in multi-store mode
     
     return final_name
 

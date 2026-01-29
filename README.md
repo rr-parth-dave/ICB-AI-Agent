@@ -1,18 +1,20 @@
-# 🤖 Auto-Heal Pipeline
+# 🤖 Auto-Heal Pipeline (Multi-Store)
 
-> **AI-powered code generation that learns from its mistakes**
+> **AI-powered code generation that learns from its mistakes - now with multi-store support**
 
-An iterative self-improvement pipeline that uses LLMs (Claude, GPT, Gemini) to automatically generate and refine data extraction scripts from HTML.
+An iterative self-improvement pipeline that uses LLMs (Claude, GPT, Gemini) to automatically generate and refine data extraction scripts from HTML. Processes each store independently and generates optimized scripts for each.
 
 ---
 
 ## 🎯 What It Does
 
-1. **You provide**: HTML samples + expected values (ground truth)
-2. **AI generates**: Python extraction code
-3. **Pipeline tests**: Runs code against your samples
-4. **AI improves**: Sees failures and fixes them
-5. **Repeat**: Until accuracy target is reached
+1. **You provide**: CSV with HTML samples + expected values (from multiple stores)
+2. **For EACH store**:
+   - AI generates Python extraction code
+   - Pipeline tests code against that store's samples
+   - AI improves by seeing failures
+   - Repeat until accuracy target is reached
+3. **You get**: One optimized script per store
 
 ---
 
@@ -21,21 +23,35 @@ An iterative self-improvement pipeline that uses LLMs (Claude, GPT, Gemini) to a
 ### 1. Prepare your data
 
 Put your CSV in `store_data/Store_OCP_Data.csv` with columns:
+- `STORE_ID` - Unique identifier for each store
 - `RAW_DOM` - HTML content
 - `GROUND_TRUTH_ORDER_ID` - Expected order ID
 - `GROUND_TRUTH_SUBTOTAL` - Expected subtotal
 
-### 2. Configure models to test
+**Example CSV structure:**
+```csv
+STORE_ID,RAW_DOM,GROUND_TRUTH_ORDER_ID,GROUND_TRUTH_SUBTOTAL
+target,<html>...,ORD-123,$45.99
+target,<html>...,ORD-456,$32.50
+walmart,<html>...,WMT-789,$78.00
+walmart,<html>...,WMT-012,$15.25
+```
 
-Edit the `MODELS_TO_TEST` list in `orchestrator.py`:
+### 2. Configure settings
+
+Edit `orchestrator.py`:
 
 ```python
+# Models to test (comment/uncomment as needed)
 MODELS_TO_TEST = [
     ("claude_fast", api_test.CLAUDE_FAST, "fast"),     # Fast
     ("openai_fast", api_test.OPENAI_FAST, "fast"),     # Fast
     # ("claude",      api_test.CLAUDE_MODEL, "capable"), # Slower but smarter
-    # ("openai",      api_test.OPENAI_MODEL, "capable"), # Slower but smarter
 ]
+
+# Pipeline settings
+MAX_ITERATIONS = 1   # Set to 1 for quick testing, 5 for thorough optimization
+MIN_SAMPLES_PER_STORE = 2  # Stores with fewer samples are skipped
 ```
 
 ### 3. Run the pipeline
@@ -44,16 +60,19 @@ MODELS_TO_TEST = [
 python orchestrator.py
 ```
 
-### 4. Get your script
+### 4. Get your scripts
 
-The best extraction script is saved as `final_{model}_iter{n}.py`
+The best extraction script for each store is saved as:
+```
+final_{store_id}_{model}_iter{n}.py
+```
 
 ---
 
 ## 📁 Project Structure
 
 ```
-├── orchestrator.py          # 🧠 Main pipeline coordinator
+├── orchestrator.py          # 🧠 Main pipeline (multi-store loop)
 ├── api_test.py              # 🔌 LLM API client (Claude, OpenAI, Gemini)
 ├── script_utils.py          # 🧹 Utilities & cleanup
 ├── bad_script.py            # 📉 Baseline comparison script
@@ -71,33 +90,58 @@ The best extraction script is saved as `final_{model}_iter{n}.py`
 
 ```
 ========================================================================================================================
-🚀 AUTO-HEAL PIPELINE v3.0
+🚀 AUTO-HEAL PIPELINE v4.0 - Multi-Store Support
+   Per-store processing | MAX_ITERATIONS=1 | MIN_SAMPLES=2
 ========================================================================================================================
 
 📂 Loading data from CSV: store_data/Store_OCP_Data.csv
-   Found 20 rows in CSV
+   Found 100 total rows
+   Found 5 unique store(s)
+   Models to test: CLAUDE_FAST, OPENAI_FAST
 
-🎲 Splitting train/test (50/50)...
-   Training: 10 rows | Test: 10 rows (holdout)
+========================================================================================================================
+🏪 PROCESSING 5 STORE(S)
+========================================================================================================================
 
-📋 Ground Truth Presence in HTML:
-┌────────────────────┬──────────────────┬──────────────────┐
-│ Ground Truth       │ Training Set     │ Test Set         │
-├────────────────────┼──────────────────┼──────────────────┤
-│ Order ID Present   │  10/10  (100%)   │  10/10  (100%)   │
-│ Subtotal Present   │   0/10  (  0%)   │   1/10  ( 10%)   │
-└────────────────────┴──────────────────┴──────────────────┘
+────────────────────────────────────────────────────────────────────────────────
+   [1/5] STORE: target
+────────────────────────────────────────────────────────────────────────────────
+   📂 Store target: 20 samples
+   Training: 10 | Test: 10
+   Ground Truth: OID=100%/100%, SUB=10%/0%
+   ✅ CLAUDE_FAST ⚡ | OID: 80% | SUB: 0% | Iter: 0 | 97ms
 
-🤖 PHASE 1: Testing CLAUDE_FAST, OPENAI_FAST
-   ✅ OPENAI_FAST: Order ID 100%, Subtotal 0%
+────────────────────────────────────────────────────────────────────────────────
+   [2/5] STORE: walmart
+────────────────────────────────────────────────────────────────────────────────
+   📂 Store walmart: 25 samples
+   Training: 12 | Test: 13
+   Ground Truth: OID=100%/100%, SUB=85%/80%
+   ✅ OPENAI_FAST ⚡ | OID: 90% | SUB: 75% | Iter: 1 | 45ms
 
-🔄 PHASE 2: Iterative Improvement (5 iterations)
-   Iteration 1: 80% accuracy
-   Iteration 2: 80% accuracy ⭐ BEST (lowest latency)
+... (more stores) ...
 
-📊 FINAL RESULTS
-   🏆 Winner: OPENAI_FAST iteration 2
-   ✅ Best script saved as: final_openai_fast_iter2.py
+========================================================================================================================
+📊 FINAL RESULTS - ALL STORES
+========================================================================================================================
+
+   📊 Store Results Summary (5 stores processed, 0 skipped):
+   Store ID        | Samples  | Model        | OID %   | SUB %   | Both %  | Fields     | Latency    | Iter 
+   --------------- | -------- | ------------ | ------- | ------- | ------- | ---------- | ---------- | -----
+   walmart         | 25       | openai_fast  |    90%  |    75%  |    70%  | 33/40      |     45.0ms | 1    
+   amazon          | 30       | claude_fast  |    85%  |    60%  |    55%  | 29/40      |     67.0ms | 1    
+   target          | 20       | claude_fast  |    80%  |     0%  |     0%  |  8/20      |     97.0ms | 0    
+   --------------- | -------- | ------------ | ------- | ------- | ------- | ---------- | ---------- | -----
+   AVERAGE         |          |              |   85.0% |   45.0% |   41.7% | 70/100     |     69.7ms |
+
+   🏆 Best Model Distribution:
+      claude_fast: 3 stores (60%)
+      openai_fast: 2 stores (40%)
+
+   📁 Generated Scripts:
+      - final_target_claude_fast_iter0.py
+      - final_walmart_openai_fast_iter1.py
+      - final_amazon_claude_fast_iter1.py
 ```
 
 ---
@@ -119,27 +163,30 @@ The best extraction script is saved as `final_{model}_iter{n}.py`
 In `orchestrator.py`:
 
 ```python
-MIN_PASS_RATE = 70      # Target accuracy (%)
-MAX_ITERATIONS = 5      # Max improvement attempts
+MIN_PASS_RATE = 70           # Target accuracy (%) per store
+MAX_ITERATIONS = 1           # Max improvement attempts per store
+                             # Set to 1 for many stores (lower API costs)
+                             # Set to 5 for thorough optimization
+MIN_SAMPLES_PER_STORE = 2    # Skip stores with fewer samples
 ```
 
 ---
 
 ## 🧠 How It Works
 
-### Phase 1: Initial Generation
-- Builds prompt with HTML context around ground truth values
-- Asks multiple LLMs to generate extraction scripts
-- Tests each and picks the best performer
+### Per-Store Processing
 
-### Phase 2: Iterative Improvement
-- Takes the best script
-- Shows it the failures with relevant HTML context
-- Asks it to fix the issues
-- Repeats until accuracy target or max iterations
+For EACH unique `STORE_ID` in your CSV:
 
-### Selection Criteria
-1. **Primary**: Maximum correct extractions
+1. **Filter** - Get only that store's samples
+2. **Split** - 50% training / 50% test (holdout)
+3. **Generate** - Ask LLMs to create extraction scripts
+4. **Test** - Run against training samples
+5. **Improve** - Show failures, ask for fixes (up to MAX_ITERATIONS)
+6. **Save** - Keep the best script for that store
+
+### Selection Criteria (per store)
+1. **Primary**: Maximum correct extractions on TEST set
 2. **Secondary**: Lowest latency (if tied)
 
 ---
@@ -148,9 +195,9 @@ MAX_ITERATIONS = 5      # Max improvement attempts
 
 | File | Purpose |
 |------|---------|
-| `orchestrator.py` | Main pipeline - run this |
+| `orchestrator.py` | Main pipeline with multi-store loop |
 | `api_test.py` | LLM API calls |
-| `script_utils.py` | Utilities |
+| `script_utils.py` | Utilities (now includes store_id in naming) |
 | `bad_script.py` | Baseline for comparison |
 | `prompt_builders/*.py` | Customizable prompts |
 
@@ -158,10 +205,20 @@ MAX_ITERATIONS = 5      # Max improvement attempts
 
 ## 💡 Tips
 
-- **More samples = better results** (20+ recommended)
+### For Many Stores (100+)
+- Set `MAX_ITERATIONS = 1` to minimize API costs
+- Use fast models (`claude_fast`, `openai_fast`)
+- Run overnight if needed
+
+### For Few Stores (< 10)
+- Set `MAX_ITERATIONS = 5` for thorough optimization
+- Can include capable models for higher accuracy
+
+### Data Quality
+- **More samples per store = better results** (10+ recommended)
 - **Include edge cases** in your training data
 - **Check ground truth presence** - if values aren't in HTML, extraction will fail
-- **Test set is sacred** - never tune based on test results
+- Stores with < 2 samples are automatically skipped
 
 ---
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-orchestrator.py - Auto-Heal Pipeline Orchestrator
+orchestrator.py - Auto-Heal Pipeline Orchestrator (Multi-Store Support)
 
 This is the main entry point that coordinates the entire auto-heal pipeline.
 It delegates prompt building to specialized modules for better maintainability.
@@ -10,6 +10,7 @@ It delegates prompt building to specialized modules for better maintainability.
 orchestrator.py (this file)
     └── Coordinates the pipeline
     └── Handles data loading, testing, and model selection
+    └── Processes EACH store independently
 
 prompt_builders/
     ├── base.py            - Shared context extraction utilities
@@ -19,16 +20,18 @@ prompt_builders/
 api_test.py
     └── LLM API client (Claude, OpenAI, Gemini)
 
-=== PIPELINE FLOW ===
+=== PIPELINE FLOW (PER STORE) ===
+
+For EACH unique STORE_ID in the CSV:
 
 Phase 1: Initial Script Generation
-    1. Load HTML samples + ground truth from CSV
+    1. Filter rows for this store
     2. Split into 50% training / 50% test
     3. Build first inference prompt (Template A)
     4. Ask LLMs to generate extraction scripts
     5. Test and select best performing script
 
-Phase 2: Iterative Improvement (up to 5 iterations)
+Phase 2: Iterative Improvement (configurable iterations)
     1. Build improvement prompt (Template B) with TRAINING failures only
     2. Ask LLM to fix the script
     3. Test and compare with previous versions
@@ -36,17 +39,18 @@ Phase 2: Iterative Improvement (up to 5 iterations)
 
 === KEY PRINCIPLES ===
 
-1. Test Set Integrity - Test set is NEVER shown to LLM for feedback
-2. Smart Context - Focused HTML snippets, not entire pages
-3. Accuracy First - Model selection prioritizes correctness over speed
-4. Separate Tracking - Order ID and subtotal accuracy tracked independently
+1. Per-Store Processing - Each store gets its own optimized script
+2. Test Set Integrity - Test set is NEVER shown to LLM for feedback
+3. Smart Context - Focused HTML snippets, not entire pages
+4. Accuracy First - Model selection prioritizes correctness over speed
+5. Separate Tracking - Order ID and subtotal accuracy tracked independently
 
 Usage:
     python orchestrator.py
 
 Output:
-    - Generates candidate_script_*.py files during execution
-    - Saves best script as fixed_script.py
+    - Generates final_{store_id}_{model}_{iter}.py for each store
+    - Displays aggregated results across all stores
 """
 
 import csv
@@ -70,13 +74,20 @@ from script_utils import check_ground_truth_presence, display_ground_truth_prese
 # =============================================================================
 
 # Path to CSV file containing HTML samples and ground truth
+# CSV should have columns: STORE_ID, RAW_DOM, GROUND_TRUTH_ORDER_ID, GROUND_TRUTH_SUBTOTAL
 CSV_PATH = 'store_data/Store_OCP_Data.csv'
 
 # Target pass rate (%) - stop improving if we hit this on test set
 MIN_PASS_RATE = 70
 
-# Maximum improvement iterations before giving up
-MAX_ITERATIONS = 5
+# Maximum improvement iterations per store
+# Set to 1 for quick testing across many stores (lower API costs)
+# Set to 5 for thorough optimization on fewer stores
+MAX_ITERATIONS = 1
+
+# Minimum samples required per store to process
+# Stores with fewer samples will be skipped (can't do 50/50 split)
+MIN_SAMPLES_PER_STORE = 2
 
 # =================================================================  ============
 # MODELS TO TEST - Edit this list to control which models are tried
@@ -158,6 +169,34 @@ def split_train_test(rows, seed=42):
     random.shuffle(shuffled)
     mid = len(shuffled) // 2
     return shuffled[:mid], shuffled[mid:]
+
+
+def get_unique_stores(rows):
+    """
+    Get a list of unique store IDs from the data.
+    
+    Args:
+        rows: List of data rows with 'store_id' key
+    
+    Returns:
+        Sorted list of unique store IDs
+    """
+    store_ids = set(row['store_id'] for row in rows)
+    return sorted(store_ids)
+
+
+def filter_by_store(rows, store_id):
+    """
+    Filter rows to only include those from a specific store.
+    
+    Args:
+        rows: List of all data rows
+        store_id: The store ID to filter for
+    
+    Returns:
+        List of rows matching the store_id
+    """
+    return [r for r in rows if r['store_id'] == store_id]
 
 
 # =============================================================================
@@ -473,92 +512,49 @@ def select_best_model(model_results):
 
 
 # =============================================================================
-# MAIN PIPELINE
+# SINGLE STORE PROCESSING
 # =============================================================================
 
-def main():
-    """Main entry point for the Auto-Heal Pipeline."""
+def process_single_store(store_id, store_rows, models_to_test, verbose=True):
+    """
+    Process a single store through the full pipeline.
     
-    print("\n" + "=" * 120)
-    print("🚀 AUTO-HEAL PIPELINE v3.0 - Modular Architecture")
-    print("   Order ID + Subtotal tracked separately | Best model = max total correct fields on TEST")
-    print("=" * 120)
+    Args:
+        store_id: The store identifier
+        store_rows: List of data rows for this store
+        models_to_test: List of (model_key, model_name, tier) tuples
+        verbose: If True, print detailed output
     
-    # =========================================================================
-    # LOAD DATA
-    # =========================================================================
+    Returns:
+        Dict with store results or None if processing failed
+    """
     
-    print(f"\n📂 Loading data from CSV: {CSV_PATH}")
-    rows = load_csv_data()
-    print(f"   Found {len(rows)} rows in CSV")
+    if verbose:
+        print(f"\n   📂 Store {store_id}: {len(store_rows)} samples")
     
-    print("\n🎲 Splitting train/test (50/50, fixed seed)...")
-    train_rows, test_rows = split_train_test(rows, seed=42)
-    print(f"   Training: {len(train_rows)} rows (used for feedback)")
-    print(f"   Test:     {len(test_rows)} rows (holdout - NEVER shown to model)")
+    # Check minimum samples
+    if len(store_rows) < MIN_SAMPLES_PER_STORE:
+        if verbose:
+            print(f"   ⚠️  Skipping - only {len(store_rows)} sample(s), need at least {MIN_SAMPLES_PER_STORE}")
+        return None
     
-    # =========================================================================
-    # GROUND TRUTH PRESENCE CHECK
-    # =========================================================================
+    # Split this store's data 50/50
+    train_rows, test_rows = split_train_test(store_rows, seed=42)
+    if verbose:
+        print(f"   Training: {len(train_rows)} | Test: {len(test_rows)}")
     
-    print("\n" + "-" * 120)
-    print("🔍 Checking Ground Truth Presence in HTML")
-    print("-" * 120)
-    
+    # Check ground truth presence
     train_presence = check_ground_truth_presence(train_rows, "Training")
     test_presence = check_ground_truth_presence(test_rows, "Test")
-    display_ground_truth_presence(train_presence, test_presence)
     
-    # =========================================================================
-    # BASELINE TEST
-    # =========================================================================
-    
-    print("\n" + "-" * 120)
-    print("📊 BASELINE: Testing bad_script.py")
-    print("-" * 120)
-    
-    if os.path.exists('bad_script.py'):
-        baseline_train_results, _ = test_script('bad_script.py', train_rows[:20])
-        baseline_test_results, _ = test_script('bad_script.py', test_rows[:20])
-        
-        baseline_train_metrics = calculate_metrics(baseline_train_results)
-        baseline_test_metrics = calculate_metrics(baseline_test_results)
-        
-        display_results(baseline_train_results, "Baseline - Training Set", max_rows=10)
-        display_results(baseline_test_results, "Baseline - Test Set", max_rows=10)
-        display_metrics(baseline_train_metrics, baseline_test_metrics, "Baseline Summary")
-    else:
-        print("   ⚠️  bad_script.py not found, skipping baseline")
-    
-    # =========================================================================
-    # DETERMINE MODELS TO TEST
-    # =========================================================================
-    
-    # Use the MODELS_TO_TEST list from configuration section
-    models_to_test = MODELS_TO_TEST
-    
-    if not models_to_test:
-        print("\n❌ No models configured in MODELS_TO_TEST. Please add at least one model.")
-        return
-    
-    print(f"\n📋 Models to test: {', '.join(m[0].upper() for m in models_to_test)}")
+    if verbose:
+        print(f"   Ground Truth: OID={train_presence['order_id_pct']}%/{test_presence['order_id_pct']}%, SUB={train_presence['subtotal_pct']}%/{test_presence['subtotal_pct']}%")
     
     # =========================================================================
     # PHASE 1: INITIAL SCRIPT GENERATION
     # =========================================================================
     
-    print("\n" + "-" * 120)
-    print("📝 Building first inference prompt (Template A) - TRAINING DATA ONLY")
-    print("-" * 120)
-    
-    # Use the modular prompt builder
     prompt = first_inference.build_prompt(train_rows)
-    print(f"   Prompt size: {len(prompt)} chars")
-    print(f"   Using {min(first_inference.MAX_TRAINING_EXAMPLES, len(train_rows))} examples with context windows")
-            
-    print("\n" + "-" * 120)
-    print(f"🤖 PHASE 1: Initial Script Generation from {len(models_to_test)} Models (🧠 Capable + ⚡ Fast)")
-    print("-" * 120)
     
     model_results = []
     test_sample = test_rows[:50] if len(test_rows) > 50 else test_rows
@@ -566,9 +562,6 @@ def main():
     
     for model_type, model_name, model_tier in models_to_test:
         try:
-            tier_icon = "⚡" if model_tier == "fast" else "🧠"
-            print(f"\n   Calling {model_type.upper()} ({model_name}) {tier_icon}...")
-            
             # Call the appropriate API
             if model_tier == "fast":
                 base_type = model_type.replace("_fast", "")
@@ -584,21 +577,17 @@ def main():
                 response = api_test.call_llm(prompt, max_tokens=4000, model_type=model_type)
             
             if not response or len(response.strip()) == 0:
-                print(f"   ⚠️  {model_type.upper()} returned empty response")
                 continue
             
             code = extract_code_from_response(response)
             if not code or len(code.strip()) == 0:
-                print(f"   ⚠️  {model_type.upper()} code extraction failed")
                 continue
             
-            script_path = f'candidate_script_{model_type}.py'
+            script_path = f'candidate_script_{store_id}_{model_type}.py'
             with open(script_path, 'w') as f:
                 f.write(code)
-            print(f"   ✅ {model_type.upper()} script saved ({len(code)} chars)")
             
             # Test on both sets
-            print(f"   Testing {model_type.upper()} script...")
             train_results, train_time = test_script(script_path, train_sample)
             test_results, test_time = test_script(script_path, test_sample)
             avg_time = (train_time + test_time) / 2
@@ -618,53 +607,49 @@ def main():
                 'avg_time': avg_time
             })
             
-            tier_label = f"{tier_icon} {model_tier.upper()}"
-            display_results(train_results, f"{model_type.upper()} ({tier_label}) - Training Set", max_rows=10)
-            display_results(test_results, f"{model_type.upper()} ({tier_label}) - Test Set (Holdout)", max_rows=10)
-            display_metrics(train_metrics, test_metrics, f"{model_type.upper()} ({tier_label}) Summary")
-            
         except Exception as e:
-            print(f"   ❌ {model_type.upper()} failed: {e}")
+            if verbose:
+                print(f"   ❌ {model_type.upper()} failed: {e}")
     
     if not model_results:
-        print("\n❌ All models failed. Exiting.")
-        return
-        
+        if verbose:
+            print(f"   ❌ All models failed for store {store_id}")
+        return None
+    
     # =========================================================================
     # SELECT BEST MODEL
     # =========================================================================
     
     best = select_best_model(model_results)
-    best_tier_icon = "⚡" if best.get('model_tier') == "fast" else "🧠"
     
-    print("\n" + "-" * 120)
-    print(f"🏆 BEST MODEL (by total correct fields on TEST): {best['model_type'].upper()} ({best['model_name']}) {best_tier_icon}")
-    print(f"   Model Tier:      {best.get('model_tier', 'capable').upper()}")
-    print(f"   Test Order IDs:  {best['test_metrics']['order_id_correct']}/{best['test_metrics']['total']} ({best['test_metrics']['order_id_rate']}%)")
-    print(f"   Test Subtotals:  {best['test_metrics']['subtotal_correct']}/{best['test_metrics']['total']} ({best['test_metrics']['subtotal_rate']}%)")
-    print(f"   Test Both:       {best['test_metrics']['both_correct']}/{best['test_metrics']['total']} ({best['test_metrics']['both_rate']}%)")
-    print(f"   Total Fields:    {best['test_metrics']['total_fields_correct']}/{best['test_metrics']['total']*2}")
-    print(f"   Avg Latency:     {best['avg_time']:.1f}ms")
-    print("-" * 120)
-    
-    # Check if we've hit target
+    # Check if we've hit target - skip iterations if so
     if best['test_metrics']['both_rate'] >= MIN_PASS_RATE:
-        print(f"\n✅ Already achieved {best['test_metrics']['both_rate']}% on test set (target: {MIN_PASS_RATE}%)!")
         final_script = cleanup_and_save_final(
             best['script_path'],
+            store_id,
             best['model_type'],
-            0  # No iterations needed
+            0
         )
-        print("=" * 120 + "\n")
-        return
+        return {
+            'store_id': store_id,
+            'samples': len(store_rows),
+            'train_count': len(train_rows),
+            'test_count': len(test_rows),
+            'best_model': best['model_type'],
+            'iterations': 0,
+            'test_oid_rate': best['test_metrics']['order_id_rate'],
+            'test_sub_rate': best['test_metrics']['subtotal_rate'],
+            'test_both_rate': best['test_metrics']['both_rate'],
+            'total_fields': best['test_metrics']['total_fields_correct'],
+            'max_fields': best['test_metrics']['total'] * 2,
+            'avg_latency': best['avg_time'],
+            'final_script': final_script,
+            'status': 'success'
+        }
     
     # =========================================================================
     # PHASE 2: ITERATIVE IMPROVEMENT
     # =========================================================================
-    
-    print("\n" + "-" * 120)
-    print("🔄 PHASE 2: Iterative Improvement (feedback from TRAINING failures only)")
-    print("-" * 120)
     
     current_script = best['script_path']
     current_train_results = best['train_results']
@@ -679,29 +664,15 @@ def main():
         'iteration': 0
     }
     
-    all_iterations = [{
-        'iteration': 0,
-        'script': current_script,
-        'test_metrics': current_test_metrics,
-        'avg_time': current_avg_time
-    }]
-    
     iteration = 1
     while current_test_metrics['both_rate'] < MIN_PASS_RATE and iteration <= MAX_ITERATIONS:
-        print(f"\n🔄 Iteration {iteration}/{MAX_ITERATIONS}")
-        print(f"   Current Test: OID={current_test_metrics['order_id_rate']}%, SUB={current_test_metrics['subtotal_rate']}%, Both={current_test_metrics['both_rate']}%")
-        print("   Building improvement prompt (Template B)...")
-        
-        # Use the modular prompt builder
         feedback_prompt = improvement.build_prompt(
             current_script, current_train_results, current_test_results, train_sample, iteration
         )
-        print(f"   Prompt size: {len(feedback_prompt)} chars")
         
         try:
             model_type = best['model_type']
             model_tier = best.get('model_tier', 'capable')
-            print(f"   Calling {model_type.upper()} for improvement...")
             
             if model_tier == "fast":
                 base_type = model_type.replace("_fast", "")
@@ -717,37 +688,22 @@ def main():
                 response = api_test.call_llm(feedback_prompt, max_tokens=4000, model_type=model_type)
             
             if not response or len(response.strip()) == 0:
-                print("   ⚠️  Empty response, stopping iteration")
                 break
             
             code = extract_code_from_response(response)
             if not code or len(code.strip()) == 0:
-                print("   ⚠️  Code extraction failed, stopping iteration")
                 break
             
-            improved_script = f"candidate_script_{best['model_type']}_v{iteration + 1}.py"
+            improved_script = f"candidate_script_{store_id}_{best['model_type']}_v{iteration + 1}.py"
             with open(improved_script, 'w') as f:
                 f.write(code)
-            print(f"   ✅ Improved script: {improved_script}")
             
             # Test improved script
             new_train_results, new_train_time = test_script(improved_script, train_sample)
             new_test_results, new_test_time = test_script(improved_script, test_sample)
             new_avg_time = (new_train_time + new_test_time) / 2
             
-            new_train_metrics = calculate_metrics(new_train_results)
             new_test_metrics = calculate_metrics(new_test_results)
-            
-            display_results(new_train_results, f"Iteration {iteration + 1} - Training Set", max_rows=10)
-            display_results(new_test_results, f"Iteration {iteration + 1} - Test Set", max_rows=10)
-            display_metrics(new_train_metrics, new_test_metrics, f"Iteration {iteration + 1} Summary")
-            
-            all_iterations.append({
-                'iteration': iteration,
-                'script': improved_script,
-                'test_metrics': new_test_metrics,
-                'avg_time': new_avg_time
-            })
             
             # Track best (accuracy first, latency second)
             if new_test_metrics['total_fields_correct'] > best_iteration['test_metrics']['total_fields_correct'] or \
@@ -758,7 +714,6 @@ def main():
                     'avg_time': new_avg_time,
                     'iteration': iteration
                 }
-                print(f"   🌟 New best! Total fields: {new_test_metrics['total_fields_correct']}/{new_test_metrics['total']*2}, Latency: {new_avg_time:.1f}ms")
             
             current_script = improved_script
             current_train_results = new_train_results
@@ -769,49 +724,189 @@ def main():
             iteration += 1
             
         except Exception as e:
-            print(f"   ❌ Improvement failed: {e}")
+            if verbose:
+                print(f"   ❌ Iteration {iteration} failed: {e}")
             break
+    
+    # Clean up candidate scripts and save final
+    final_script = cleanup_and_save_final(
+        best_iteration['script'],
+        store_id,
+        best['model_type'],
+        best_iteration['iteration']
+    )
+    
+    if verbose:
+        tier_icon = "⚡" if best.get('model_tier') == "fast" else "🧠"
+        print(f"   ✅ {best['model_type'].upper()} {tier_icon} | OID: {best_iteration['test_metrics']['order_id_rate']}% | SUB: {best_iteration['test_metrics']['subtotal_rate']}% | Iter: {best_iteration['iteration']} | {best_iteration['avg_time']:.0f}ms")
+    
+    return {
+        'store_id': store_id,
+        'samples': len(store_rows),
+        'train_count': len(train_rows),
+        'test_count': len(test_rows),
+        'best_model': best['model_type'],
+        'iterations': best_iteration['iteration'],
+        'test_oid_rate': best_iteration['test_metrics']['order_id_rate'],
+        'test_sub_rate': best_iteration['test_metrics']['subtotal_rate'],
+        'test_both_rate': best_iteration['test_metrics']['both_rate'],
+        'total_fields': best_iteration['test_metrics']['total_fields_correct'],
+        'max_fields': best_iteration['test_metrics']['total'] * 2,
+        'avg_latency': best_iteration['avg_time'],
+        'final_script': final_script,
+        'status': 'success'
+    }
+
+
+# =============================================================================
+# RESULTS AGGREGATION
+# =============================================================================
+
+def display_store_summary(all_store_results):
+    """
+    Display aggregated results across all stores.
+    
+    Args:
+        all_store_results: List of store result dicts
+    """
+    # Filter successful results
+    successful = [r for r in all_store_results if r is not None and r.get('status') == 'success']
+    skipped = len(all_store_results) - len(successful)
+    
+    if not successful:
+        print("\n   ❌ No stores were successfully processed.")
+        return
+    
+    print(f"\n   📊 Store Results Summary ({len(successful)} stores processed, {skipped} skipped):")
+    print(f"   {'Store ID':<15} | {'Samples':<8} | {'Model':<12} | {'OID %':<7} | {'SUB %':<7} | {'Both %':<7} | {'Fields':<10} | {'Latency':<10} | {'Iter':<5}")
+    print(f"   {'-'*15} | {'-'*8} | {'-'*12} | {'-'*7} | {'-'*7} | {'-'*7} | {'-'*10} | {'-'*10} | {'-'*5}")
+    
+    for r in sorted(successful, key=lambda x: -x['total_fields']):
+        store_display = str(r['store_id'])[:15]
+        print(f"   {store_display:<15} | {r['samples']:<8} | {r['best_model']:<12} | {r['test_oid_rate']:>5}% | {r['test_sub_rate']:>5}% | {r['test_both_rate']:>5}% | {r['total_fields']:>3}/{r['max_fields']:<5} | {r['avg_latency']:>7.1f}ms | {r['iterations']:<5}")
+    
+    # Aggregate statistics
+    total_fields = sum(r['total_fields'] for r in successful)
+    max_fields = sum(r['max_fields'] for r in successful)
+    avg_oid = sum(r['test_oid_rate'] for r in successful) / len(successful)
+    avg_sub = sum(r['test_sub_rate'] for r in successful) / len(successful)
+    avg_both = sum(r['test_both_rate'] for r in successful) / len(successful)
+    avg_latency = sum(r['avg_latency'] for r in successful) / len(successful)
+    
+    print(f"   {'-'*15} | {'-'*8} | {'-'*12} | {'-'*7} | {'-'*7} | {'-'*7} | {'-'*10} | {'-'*10} | {'-'*5}")
+    print(f"   {'AVERAGE':<15} | {'':<8} | {'':<12} | {avg_oid:>5.1f}% | {avg_sub:>5.1f}% | {avg_both:>5.1f}% | {total_fields:>3}/{max_fields:<5} | {avg_latency:>7.1f}ms |")
+    
+    # Model distribution
+    model_counts = {}
+    for r in successful:
+        m = r['best_model']
+        model_counts[m] = model_counts.get(m, 0) + 1
+    
+    print(f"\n   🏆 Best Model Distribution:")
+    for model, count in sorted(model_counts.items(), key=lambda x: -x[1]):
+        pct = (count * 100) // len(successful)
+        print(f"      {model}: {count} stores ({pct}%)")
+
+
+# =============================================================================
+# MAIN PIPELINE
+# =============================================================================
+
+def main():
+    """Main entry point for the Multi-Store Auto-Heal Pipeline."""
+    
+    print("\n" + "=" * 120)
+    print("🚀 AUTO-HEAL PIPELINE v4.0 - Multi-Store Support")
+    print(f"   Per-store processing | MAX_ITERATIONS={MAX_ITERATIONS} | MIN_SAMPLES={MIN_SAMPLES_PER_STORE}")
+    print("=" * 120)
+    
+    # =========================================================================
+    # LOAD DATA
+    # =========================================================================
+    
+    print(f"\n📂 Loading data from CSV: {CSV_PATH}")
+    all_rows = load_csv_data()
+    print(f"   Found {len(all_rows)} total rows")
+    
+    # Get unique stores
+    store_ids = get_unique_stores(all_rows)
+    print(f"   Found {len(store_ids)} unique store(s)")
+    
+    # =========================================================================
+    # VALIDATE MODELS
+    # =========================================================================
+    
+    models_to_test = MODELS_TO_TEST
+    if not models_to_test:
+        print("\n❌ No models configured in MODELS_TO_TEST. Please add at least one model.")
+        return
+    
+    print(f"   Models to test: {', '.join(m[0].upper() for m in models_to_test)}")
+    
+    # =========================================================================
+    # BASELINE TEST (optional - on first store)
+    # =========================================================================
+    
+    if os.path.exists('bad_script.py') and len(store_ids) > 0:
+        print("\n" + "-" * 120)
+        print("📊 BASELINE: Testing bad_script.py on first store")
+        print("-" * 120)
         
+        first_store_rows = filter_by_store(all_rows, store_ids[0])
+        train_rows, test_rows = split_train_test(first_store_rows, seed=42)
+        
+        baseline_train_results, _ = test_script('bad_script.py', train_rows[:20])
+        baseline_test_results, _ = test_script('bad_script.py', test_rows[:20])
+        
+        baseline_train_metrics = calculate_metrics(baseline_train_results)
+        baseline_test_metrics = calculate_metrics(baseline_test_results)
+        
+        display_metrics(baseline_train_metrics, baseline_test_metrics, f"Baseline Summary (Store: {store_ids[0]})")
+    
+    # =========================================================================
+    # PROCESS EACH STORE
+    # =========================================================================
+    
+    print("\n" + "=" * 120)
+    print(f"🏪 PROCESSING {len(store_ids)} STORE(S)")
+    print("=" * 120)
+    
+    all_store_results = []
+    
+    for idx, store_id in enumerate(store_ids, 1):
+        print(f"\n{'─' * 80}")
+        print(f"   [{idx}/{len(store_ids)}] STORE: {store_id}")
+        print(f"{'─' * 80}")
+        
+        store_rows = filter_by_store(all_rows, store_id)
+        
+        result = process_single_store(
+            store_id=store_id,
+            store_rows=store_rows,
+            models_to_test=models_to_test,
+            verbose=True
+        )
+        
+        all_store_results.append(result)
+    
     # =========================================================================
     # FINAL SUMMARY
     # =========================================================================
     
     print("\n" + "=" * 120)
-    print("📊 FINAL RESULTS")
+    print("📊 FINAL RESULTS - ALL STORES")
     print("=" * 120)
     
-    print("\n   📈 All Iterations Comparison (sorted by accuracy first, then latency):")
-    print(f"   {'Iter':<6} | {'OID':<10} | {'SUB':<10} | {'Total Fields':<14} | {'Avg Latency':<12} | {'Status':<10}")
-    print(f"   {'-'*6} | {'-'*10} | {'-'*10} | {'-'*14} | {'-'*12} | {'-'*10}")
+    display_store_summary(all_store_results)
     
-    for it in all_iterations:
-        is_best = it['iteration'] == best_iteration['iteration']
-        status = "⭐ BEST" if is_best else ""
-        m = it['test_metrics']
-        print(f"   {it['iteration']:<6} | {m['order_id_correct']:>3}/{m['total']:<3} ({m['order_id_rate']:>2}%) | {m['subtotal_correct']:>3}/{m['total']:<3} ({m['subtotal_rate']:>2}%) | {m['total_fields_correct']:>5}/{m['total']*2:<5}      | {it['avg_time']:>8.1f}ms   | {status:<10}")
+    # List generated scripts
+    successful = [r for r in all_store_results if r is not None and r.get('status') == 'success']
+    if successful:
+        print(f"\n   📁 Generated Scripts:")
+        for r in successful:
+            print(f"      - {r['final_script']}")
     
-    print(f"\n   🏆 Winner: Iteration {best_iteration['iteration']} (0 = initial)")
-    print(f"   Selection: Max total fields = {best_iteration['test_metrics']['total_fields_correct']}, then lowest latency = {best_iteration['avg_time']:.1f}ms")
-    print(f"\n   Best Script: {best_iteration['script']}")
-    print(f"   Test Order IDs:  {best_iteration['test_metrics']['order_id_correct']}/{best_iteration['test_metrics']['total']} ({best_iteration['test_metrics']['order_id_rate']}%)")
-    print(f"   Test Subtotals:  {best_iteration['test_metrics']['subtotal_correct']}/{best_iteration['test_metrics']['total']} ({best_iteration['test_metrics']['subtotal_rate']}%)")
-    print(f"   Test Both:       {best_iteration['test_metrics']['both_correct']}/{best_iteration['test_metrics']['total']} ({best_iteration['test_metrics']['both_rate']}%)")
-    print(f"   Total Fields:    {best_iteration['test_metrics']['total_fields_correct']}/{best_iteration['test_metrics']['total']*2}")
-    print(f"   Avg Latency:     {best_iteration['avg_time']:.1f}ms")
-    
-    if best_iteration['test_metrics']['both_rate'] >= MIN_PASS_RATE:
-        print(f"\n✅ SUCCESS! Achieved {best_iteration['test_metrics']['both_rate']}% on test set (target: {MIN_PASS_RATE}%)")
-    else:
-        print(f"\n⚠️  Stopped at {best_iteration['test_metrics']['both_rate']}% on test set (target: {MIN_PASS_RATE}%)")
-    
-    # Clean up candidate scripts and save final
-    final_script = cleanup_and_save_final(
-        best_iteration['script'],
-        best['model_type'],
-        best_iteration['iteration']
-    )
-    
-    print("=" * 120 + "\n")
+    print("\n" + "=" * 120 + "\n")
 
 
 if __name__ == "__main__":
