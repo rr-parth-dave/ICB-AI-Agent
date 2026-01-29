@@ -70,12 +70,23 @@ from script_utils import check_ground_truth_presence, display_ground_truth_prese
 
 
 # =============================================================================
+# OUTPUT HELPERS (for real-time progress)
+# =============================================================================
+
+def log(message="", end="\n"):
+    """Print message and flush immediately for real-time output."""
+    print(message, end=end)
+    sys.stdout.flush()
+
+
+# =============================================================================
 # CONFIGURATION
 # =============================================================================
 
 # Path to CSV file containing HTML samples and ground truth
 # CSV should have columns: STORE_ID, RAW_DOM, GROUND_TRUTH_ORDER_ID, GROUND_TRUTH_SUBTOTAL
-CSV_PATH = 'store_data/Store_OCP_Data.csv'
+# Extra columns (like UPDATE_TIMESTAMP) are ignored
+CSV_PATH = 'store_data/10 Stores.csv'
 
 # Target pass rate (%) - stop improving if we hit this on test set
 MIN_PASS_RATE = 70
@@ -471,19 +482,19 @@ def display_results(results, title="Results", max_rows=20):
 
 def display_metrics(train_metrics, test_metrics, title="Summary"):
     """Display summary comparison table of train vs test metrics."""
-    print(f"\n   {title}:")
-    print(f"   ┌────────────────────┬──────────────────┬──────────────────┐")
-    print(f"   │ Metric             │ Training         │ Test (Holdout)   │")
-    print(f"   ├────────────────────┼──────────────────┼──────────────────┤")
-    print(f"   │ Order ID Correct   │ {train_metrics['order_id_correct']:>3}/{train_metrics['total']:<3} ({train_metrics['order_id_rate']:>3}%)   │ {test_metrics['order_id_correct']:>3}/{test_metrics['total']:<3} ({test_metrics['order_id_rate']:>3}%)   │")
-    print(f"   │ Subtotal Correct   │ {train_metrics['subtotal_correct']:>3}/{train_metrics['total']:<3} ({train_metrics['subtotal_rate']:>3}%)   │ {test_metrics['subtotal_correct']:>3}/{test_metrics['total']:<3} ({test_metrics['subtotal_rate']:>3}%)   │")
-    print(f"   │ Both Correct       │ {train_metrics['both_correct']:>3}/{train_metrics['total']:<3} ({train_metrics['both_rate']:>3}%)   │ {test_metrics['both_correct']:>3}/{test_metrics['total']:<3} ({test_metrics['both_rate']:>3}%)   │")
-    print(f"   │ Total Fields       │ {train_metrics['total_fields_correct']:>3}/{train_metrics['total']*2:<3}          │ {test_metrics['total_fields_correct']:>3}/{test_metrics['total']*2:<3}          │")
-    print(f"   ├────────────────────┼──────────────────┼──────────────────┤")
-    print(f"   │ Avg Latency (ms)   │ {train_metrics['avg_latency']:>10.1f}       │ {test_metrics['avg_latency']:>10.1f}       │")
-    print(f"   │ Min Latency (ms)   │ {train_metrics['min_latency']:>10.1f}       │ {test_metrics['min_latency']:>10.1f}       │")
-    print(f"   │ Max Latency (ms)   │ {train_metrics['max_latency']:>10.1f}       │ {test_metrics['max_latency']:>10.1f}       │")
-    print(f"   └────────────────────┴──────────────────┴──────────────────┘")
+    log(f"\n   {title}:")
+    log(f"   ┌────────────────────┬──────────────────┬──────────────────┐")
+    log(f"   │ Metric             │ Training         │ Test (Holdout)   │")
+    log(f"   ├────────────────────┼──────────────────┼──────────────────┤")
+    log(f"   │ Order ID Correct   │ {train_metrics['order_id_correct']:>3}/{train_metrics['total']:<3} ({train_metrics['order_id_rate']:>3}%)   │ {test_metrics['order_id_correct']:>3}/{test_metrics['total']:<3} ({test_metrics['order_id_rate']:>3}%)   │")
+    log(f"   │ Subtotal Correct   │ {train_metrics['subtotal_correct']:>3}/{train_metrics['total']:<3} ({train_metrics['subtotal_rate']:>3}%)   │ {test_metrics['subtotal_correct']:>3}/{test_metrics['total']:<3} ({test_metrics['subtotal_rate']:>3}%)   │")
+    log(f"   │ Both Correct       │ {train_metrics['both_correct']:>3}/{train_metrics['total']:<3} ({train_metrics['both_rate']:>3}%)   │ {test_metrics['both_correct']:>3}/{test_metrics['total']:<3} ({test_metrics['both_rate']:>3}%)   │")
+    log(f"   │ Total Fields       │ {train_metrics['total_fields_correct']:>3}/{train_metrics['total']*2:<3}          │ {test_metrics['total_fields_correct']:>3}/{test_metrics['total']*2:<3}          │")
+    log(f"   ├────────────────────┼──────────────────┼──────────────────┤")
+    log(f"   │ Avg Latency (ms)   │ {train_metrics['avg_latency']:>10.1f}       │ {test_metrics['avg_latency']:>10.1f}       │")
+    log(f"   │ Min Latency (ms)   │ {train_metrics['min_latency']:>10.1f}       │ {test_metrics['min_latency']:>10.1f}       │")
+    log(f"   │ Max Latency (ms)   │ {train_metrics['max_latency']:>10.1f}       │ {test_metrics['max_latency']:>10.1f}       │")
+    log(f"   └────────────────────┴──────────────────┴──────────────────┘")
 
 
 # =============================================================================
@@ -774,16 +785,16 @@ def display_store_summary(all_store_results):
     skipped = len(all_store_results) - len(successful)
     
     if not successful:
-        print("\n   ❌ No stores were successfully processed.")
+        log("\n   ❌ No stores were successfully processed.")
         return
     
-    print(f"\n   📊 Store Results Summary ({len(successful)} stores processed, {skipped} skipped):")
-    print(f"   {'Store ID':<15} | {'Samples':<8} | {'Model':<12} | {'OID %':<7} | {'SUB %':<7} | {'Both %':<7} | {'Fields':<10} | {'Latency':<10} | {'Iter':<5}")
-    print(f"   {'-'*15} | {'-'*8} | {'-'*12} | {'-'*7} | {'-'*7} | {'-'*7} | {'-'*10} | {'-'*10} | {'-'*5}")
+    log(f"\n   📊 Store Results Summary ({len(successful)} stores processed, {skipped} skipped):")
+    log(f"   {'Store ID':<15} | {'Samples':<8} | {'Model':<12} | {'OID %':<7} | {'SUB %':<7} | {'Both %':<7} | {'Fields':<10} | {'Latency':<10} | {'Iter':<5}")
+    log(f"   {'-'*15} | {'-'*8} | {'-'*12} | {'-'*7} | {'-'*7} | {'-'*7} | {'-'*10} | {'-'*10} | {'-'*5}")
     
     for r in sorted(successful, key=lambda x: -x['total_fields']):
         store_display = str(r['store_id'])[:15]
-        print(f"   {store_display:<15} | {r['samples']:<8} | {r['best_model']:<12} | {r['test_oid_rate']:>5}% | {r['test_sub_rate']:>5}% | {r['test_both_rate']:>5}% | {r['total_fields']:>3}/{r['max_fields']:<5} | {r['avg_latency']:>7.1f}ms | {r['iterations']:<5}")
+        log(f"   {store_display:<15} | {r['samples']:<8} | {r['best_model']:<12} | {r['test_oid_rate']:>5}% | {r['test_sub_rate']:>5}% | {r['test_both_rate']:>5}% | {r['total_fields']:>3}/{r['max_fields']:<5} | {r['avg_latency']:>7.1f}ms | {r['iterations']:<5}")
     
     # Aggregate statistics
     total_fields = sum(r['total_fields'] for r in successful)
@@ -793,8 +804,8 @@ def display_store_summary(all_store_results):
     avg_both = sum(r['test_both_rate'] for r in successful) / len(successful)
     avg_latency = sum(r['avg_latency'] for r in successful) / len(successful)
     
-    print(f"   {'-'*15} | {'-'*8} | {'-'*12} | {'-'*7} | {'-'*7} | {'-'*7} | {'-'*10} | {'-'*10} | {'-'*5}")
-    print(f"   {'AVERAGE':<15} | {'':<8} | {'':<12} | {avg_oid:>5.1f}% | {avg_sub:>5.1f}% | {avg_both:>5.1f}% | {total_fields:>3}/{max_fields:<5} | {avg_latency:>7.1f}ms |")
+    log(f"   {'-'*15} | {'-'*8} | {'-'*12} | {'-'*7} | {'-'*7} | {'-'*7} | {'-'*10} | {'-'*10} | {'-'*5}")
+    log(f"   {'AVERAGE':<15} | {'':<8} | {'':<12} | {avg_oid:>5.1f}% | {avg_sub:>5.1f}% | {avg_both:>5.1f}% | {total_fields:>3}/{max_fields:<5} | {avg_latency:>7.1f}ms |")
     
     # Model distribution
     model_counts = {}
@@ -802,35 +813,98 @@ def display_store_summary(all_store_results):
         m = r['best_model']
         model_counts[m] = model_counts.get(m, 0) + 1
     
-    print(f"\n   🏆 Best Model Distribution:")
+    log(f"\n   🏆 Best Model Distribution:")
     for model, count in sorted(model_counts.items(), key=lambda x: -x[1]):
         pct = (count * 100) // len(successful)
-        print(f"      {model}: {count} stores ({pct}%)")
+        log(f"      {model}: {count} stores ({pct}%)")
 
 
 # =============================================================================
 # MAIN PIPELINE
 # =============================================================================
 
+def display_store_overview(all_rows, store_ids):
+    """
+    Display overview of all stores and their sample counts at the beginning.
+    
+    Args:
+        all_rows: All data rows
+        store_ids: List of unique store IDs
+    """
+    log("\n" + "=" * 120)
+    log("📋 STORE OVERVIEW")
+    log("=" * 120)
+    
+    # Build store info
+    store_info = []
+    for store_id in store_ids:
+        store_rows = [r for r in all_rows if r['store_id'] == store_id]
+        train_count = len(store_rows) // 2
+        test_count = len(store_rows) - train_count
+        can_process = len(store_rows) >= MIN_SAMPLES_PER_STORE
+        store_info.append({
+            'store_id': store_id,
+            'samples': len(store_rows),
+            'train': train_count,
+            'test': test_count,
+            'status': '✅ Ready' if can_process else f'⚠️ Skip (<{MIN_SAMPLES_PER_STORE})'
+        })
+    
+    # Print table
+    log(f"\n   {'#':<4} | {'Store ID':<15} | {'Samples':<8} | {'Train':<6} | {'Test':<6} | {'Status':<15}")
+    log(f"   {'-'*4} | {'-'*15} | {'-'*8} | {'-'*6} | {'-'*6} | {'-'*15}")
+    
+    for idx, info in enumerate(store_info, 1):
+        log(f"   {idx:<4} | {str(info['store_id']):<15} | {info['samples']:<8} | {info['train']:<6} | {info['test']:<6} | {info['status']:<15}")
+    
+    log(f"   {'-'*4} | {'-'*15} | {'-'*8} | {'-'*6} | {'-'*6} | {'-'*15}")
+    total_samples = sum(i['samples'] for i in store_info)
+    processable = sum(1 for i in store_info if i['samples'] >= MIN_SAMPLES_PER_STORE)
+    log(f"   {'TOTAL':<4} | {len(store_ids):<15} | {total_samples:<8} | {'':<6} | {'':<6} | {processable} processable")
+    log("")
+
+
+def display_progress_header():
+    """Display the header for progressive results table."""
+    log("\n" + "=" * 120)
+    log("🔄 PROCESSING STORES (Real-time Progress)")
+    log("=" * 120)
+    log(f"\n   {'#':<4} | {'Store ID':<12} | {'Status':<10} | {'Model':<12} | {'OID %':<7} | {'SUB %':<7} | {'Both %':<7} | {'Fields':<8} | {'Latency':<10} | {'Script':<30}")
+    log(f"   {'-'*4} | {'-'*12} | {'-'*10} | {'-'*12} | {'-'*7} | {'-'*7} | {'-'*7} | {'-'*8} | {'-'*10} | {'-'*30}")
+
+
+def display_progress_row(idx, total, result):
+    """Display a single row of progress as a store completes."""
+    if result is None:
+        log(f"   {idx:<4} | {'???':<12} | {'SKIPPED':<10} | {'-':<12} | {'-':>5}  | {'-':>5}  | {'-':>5}  | {'-':<8} | {'-':<10} | {'-':<30}")
+    elif result.get('status') == 'success':
+        store_display = str(result['store_id'])[:12]
+        script_display = result.get('final_script', '-')[:30]
+        log(f"   {idx:<4} | {store_display:<12} | {'✅ DONE':<10} | {result['best_model']:<12} | {result['test_oid_rate']:>5}% | {result['test_sub_rate']:>5}% | {result['test_both_rate']:>5}% | {result['total_fields']:>3}/{result['max_fields']:<3} | {result['avg_latency']:>7.1f}ms | {script_display:<30}")
+    else:
+        store_display = str(result.get('store_id', '???'))[:12]
+        log(f"   {idx:<4} | {store_display:<12} | {'❌ FAIL':<10} | {'-':<12} | {'-':>5}  | {'-':>5}  | {'-':>5}  | {'-':<8} | {'-':<10} | {'-':<30}")
+
+
 def main():
     """Main entry point for the Multi-Store Auto-Heal Pipeline."""
     
-    print("\n" + "=" * 120)
-    print("🚀 AUTO-HEAL PIPELINE v4.0 - Multi-Store Support")
-    print(f"   Per-store processing | MAX_ITERATIONS={MAX_ITERATIONS} | MIN_SAMPLES={MIN_SAMPLES_PER_STORE}")
-    print("=" * 120)
+    log("\n" + "=" * 120)
+    log("🚀 AUTO-HEAL PIPELINE v4.0 - Multi-Store Support")
+    log(f"   Per-store processing | MAX_ITERATIONS={MAX_ITERATIONS} | MIN_SAMPLES={MIN_SAMPLES_PER_STORE}")
+    log("=" * 120)
     
     # =========================================================================
     # LOAD DATA
     # =========================================================================
     
-    print(f"\n📂 Loading data from CSV: {CSV_PATH}")
+    log(f"\n📂 Loading data from CSV: {CSV_PATH}")
     all_rows = load_csv_data()
-    print(f"   Found {len(all_rows)} total rows")
+    log(f"   Found {len(all_rows)} total rows")
     
     # Get unique stores
     store_ids = get_unique_stores(all_rows)
-    print(f"   Found {len(store_ids)} unique store(s)")
+    log(f"   Found {len(store_ids)} unique store(s)")
     
     # =========================================================================
     # VALIDATE MODELS
@@ -838,19 +912,25 @@ def main():
     
     models_to_test = MODELS_TO_TEST
     if not models_to_test:
-        print("\n❌ No models configured in MODELS_TO_TEST. Please add at least one model.")
+        log("\n❌ No models configured in MODELS_TO_TEST. Please add at least one model.")
         return
     
-    print(f"   Models to test: {', '.join(m[0].upper() for m in models_to_test)}")
+    log(f"   Models to test: {', '.join(m[0].upper() for m in models_to_test)}")
+    
+    # =========================================================================
+    # STORE OVERVIEW
+    # =========================================================================
+    
+    display_store_overview(all_rows, store_ids)
     
     # =========================================================================
     # BASELINE TEST (optional - on first store)
     # =========================================================================
     
     if os.path.exists('bad_script.py') and len(store_ids) > 0:
-        print("\n" + "-" * 120)
-        print("📊 BASELINE: Testing bad_script.py on first store")
-        print("-" * 120)
+        log("-" * 120)
+        log("📊 BASELINE: Testing bad_script.py on first store")
+        log("-" * 120)
         
         first_store_rows = filter_by_store(all_rows, store_ids[0])
         train_rows, test_rows = split_train_test(first_store_rows, seed=42)
@@ -864,49 +944,56 @@ def main():
         display_metrics(baseline_train_metrics, baseline_test_metrics, f"Baseline Summary (Store: {store_ids[0]})")
     
     # =========================================================================
-    # PROCESS EACH STORE
+    # PROCESS EACH STORE WITH PROGRESSIVE OUTPUT
     # =========================================================================
     
-    print("\n" + "=" * 120)
-    print(f"🏪 PROCESSING {len(store_ids)} STORE(S)")
-    print("=" * 120)
+    display_progress_header()
     
     all_store_results = []
     
     for idx, store_id in enumerate(store_ids, 1):
-        print(f"\n{'─' * 80}")
-        print(f"   [{idx}/{len(store_ids)}] STORE: {store_id}")
-        print(f"{'─' * 80}")
-        
         store_rows = filter_by_store(all_rows, store_id)
         
+        # Skip stores with too few samples
+        if len(store_rows) < MIN_SAMPLES_PER_STORE:
+            result = {
+                'store_id': store_id,
+                'status': 'skipped',
+                'reason': f'Only {len(store_rows)} samples'
+            }
+            all_store_results.append(result)
+            display_progress_row(idx, len(store_ids), None)
+            continue
+        
+        # Process the store (verbose=False since we show progress differently)
         result = process_single_store(
             store_id=store_id,
             store_rows=store_rows,
             models_to_test=models_to_test,
-            verbose=True
+            verbose=False  # We handle output via progress table
         )
         
         all_store_results.append(result)
+        display_progress_row(idx, len(store_ids), result)
     
     # =========================================================================
     # FINAL SUMMARY
     # =========================================================================
     
-    print("\n" + "=" * 120)
-    print("📊 FINAL RESULTS - ALL STORES")
-    print("=" * 120)
+    log("\n" + "=" * 120)
+    log("📊 FINAL RESULTS - ALL STORES")
+    log("=" * 120)
     
     display_store_summary(all_store_results)
     
     # List generated scripts
     successful = [r for r in all_store_results if r is not None and r.get('status') == 'success']
     if successful:
-        print(f"\n   📁 Generated Scripts:")
+        log(f"\n   📁 Generated Scripts:")
         for r in successful:
-            print(f"      - {r['final_script']}")
+            log(f"      - {r['final_script']}")
     
-    print("\n" + "=" * 120 + "\n")
+    log("\n" + "=" * 120 + "\n")
 
 
 if __name__ == "__main__":
