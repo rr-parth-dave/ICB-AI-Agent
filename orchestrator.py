@@ -78,7 +78,7 @@ MIN_PASS_RATE = 70
 # Maximum improvement iterations before giving up
 MAX_ITERATIONS = 5
 
-# =============================================================================
+# =================================================================  ============
 # MODELS TO TEST - Edit this list to control which models are tried
 # =============================================================================
 # Each entry is: (model_key, model_name, tier)
