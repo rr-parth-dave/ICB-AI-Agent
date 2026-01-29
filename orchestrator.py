@@ -886,6 +886,89 @@ def display_progress_row(idx, total, result):
         log(f"   {idx:<4} | {store_display:<12} | {'❌ FAIL':<10} | {'-':<12} | {'-':>5}  | {'-':>5}  | {'-':>5}  | {'-':<8} | {'-':<10} | {'-':<30}")
 
 
+def save_results_to_csv(all_store_results, output_path='results.csv'):
+    """
+    Save all store results to a CSV file for review.
+    
+    Args:
+        all_store_results: List of store result dicts
+        output_path: Path to save the CSV file
+    
+    Returns:
+        Path to the saved CSV file
+    """
+    from datetime import datetime
+    
+    # Generate timestamped filename
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_path = f'results_{timestamp}.csv'
+    
+    # Define columns
+    columns = [
+        'store_id',
+        'status',
+        'samples',
+        'train_count',
+        'test_count',
+        'best_model',
+        'iterations',
+        'test_order_id_accuracy',
+        'test_subtotal_accuracy',
+        'test_both_accuracy',
+        'total_fields_correct',
+        'max_fields',
+        'avg_latency_ms',
+        'final_script'
+    ]
+    
+    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=columns)
+        writer.writeheader()
+        
+        for result in all_store_results:
+            if result is None:
+                continue
+            
+            if result.get('status') == 'success':
+                row = {
+                    'store_id': result.get('store_id', ''),
+                    'status': 'success',
+                    'samples': result.get('samples', ''),
+                    'train_count': result.get('train_count', ''),
+                    'test_count': result.get('test_count', ''),
+                    'best_model': result.get('best_model', ''),
+                    'iterations': result.get('iterations', ''),
+                    'test_order_id_accuracy': result.get('test_oid_rate', ''),
+                    'test_subtotal_accuracy': result.get('test_sub_rate', ''),
+                    'test_both_accuracy': result.get('test_both_rate', ''),
+                    'total_fields_correct': result.get('total_fields', ''),
+                    'max_fields': result.get('max_fields', ''),
+                    'avg_latency_ms': round(result.get('avg_latency', 0), 1),
+                    'final_script': result.get('final_script', '')
+                }
+            else:
+                row = {
+                    'store_id': result.get('store_id', ''),
+                    'status': result.get('status', 'failed'),
+                    'samples': result.get('samples', ''),
+                    'train_count': '',
+                    'test_count': '',
+                    'best_model': '',
+                    'iterations': '',
+                    'test_order_id_accuracy': '',
+                    'test_subtotal_accuracy': '',
+                    'test_both_accuracy': '',
+                    'total_fields_correct': '',
+                    'max_fields': '',
+                    'avg_latency_ms': '',
+                    'final_script': ''
+                }
+            
+            writer.writerow(row)
+    
+    return output_path
+
+
 def main():
     """Main entry point for the Multi-Store Auto-Heal Pipeline."""
     
@@ -992,6 +1075,10 @@ def main():
         log(f"\n   📁 Generated Scripts:")
         for r in successful:
             log(f"      - {r['final_script']}")
+    
+    # Save results to CSV
+    results_csv = save_results_to_csv(all_store_results)
+    log(f"\n   📄 Results saved to: {results_csv}")
     
     log("\n" + "=" * 120 + "\n")
 

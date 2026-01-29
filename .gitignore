@@ -13,6 +13,9 @@ final_*.py
 candidate_script_*.py
 fixed_script.py
 
+# Results output files
+results_*.csv
+
 # Large data files (> 100MB GitHub limit)
 # Keep sample data tracked, but exclude large production CSVs
 store_data/10 Stores.csv
